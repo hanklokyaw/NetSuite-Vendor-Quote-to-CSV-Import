@@ -1,6 +1,12 @@
 import camelot
 import pandas as pd
 import os
+from datetime import datetime
+
+
+today_date = datetime.today().strftime('%Y%m%d')
+sku_filename =f'item_sku_{today_date}_tooltech.csv'
+so_filename = f'ns_non-inv_so_{today_date}_tooltech.csv'
 
 def is_valid_pdf(file_path):
     return file_path.lower().endswith('.pdf')
@@ -123,6 +129,53 @@ def transform_data(df):
 #         print("No item in this page.")
 
 def netsuite_import_sku(filepath):
+
+    # Replace the file extension from .pdf to .xlsx
+    excel_path = filepath.replace(".pdf", ".xlsx")
+
+    # Read all sheets into a dictionary of DataFrames
+    all_sheets = pd.read_excel(excel_path, sheet_name=None)
+
+    # List to hold transformed DataFrames
+    transformed_dfs = []
+
+    # Iterate through each sheet
+    for sheet_name, df in all_sheets.items():
+        # Check if the sheet contains the necessary conditions
+        if check_orderd_string(df):
+            transformed_df = transform_data(df)
+            transformed_dfs.append(transformed_df)
+        else:
+            print(f"No valid items in sheet '{sheet_name}'.")
+
+    # Concatenate all transformed DataFrames
+    if transformed_dfs:
+        final_df = pd.concat(transformed_dfs, ignore_index=True)
+
+        # Calculate the subtotal (sum of Ordered * Price)
+        # Ensure columns "Ordered" and "Price" are numeric
+        final_df["Ordered"] = pd.to_numeric(final_df["Ordered"], errors='coerce')
+        final_df["Price"] = pd.to_numeric(final_df["Price"], errors='coerce')
+        final_df["Total"] = final_df["Ordered"] * final_df["Price"]
+
+        # Calculate subtotal
+        subtotal = final_df["Total"].sum()
+        print(f"Sub-total Amount: {subtotal:.2f}")
+
+        # Rearrange SKU import csv columns
+        final_df = final_df.drop(columns=['Total'])
+        final_df = final_df.rename(columns={'Item ID':'Item Name'})
+        final_df['Vendor'] = '4062 Tool Technology Distributors, Inc.'
+        final_df['SKU'] = final_df['Item Name']
+        final_df = final_df[['Vendor', 'Item Name', 'SKU', 'Price']]
+        return  final_df.to_csv(sku_filename, index=False)
+    else:
+        final_df = pd.DataFrame()
+        print("No valid items found in any sheets.")
+
+    # print(final_df)
+
+def netsuite_import_so(filepath):
 
     # Replace the file extension from .pdf to .xlsx
     excel_path = filepath.replace(".pdf", ".xlsx")
