@@ -5,48 +5,55 @@ from datetime import datetime
 
 
 today_date = datetime.today().strftime('%Y%m%d')
+formatted_today_date = datetime.today().strftime('%m/%d/%Y')
 sku_filename =f'item_sku_{today_date}_tooltech.csv'
-so_filename = f'ns_non-inv_so_{today_date}_tooltech.csv'
+po_filename = f'ns_non-inv_so_{today_date}_tooltech.csv'
 
 def is_valid_pdf(file_path):
     return file_path.lower().endswith('.pdf')
 
-# Get the file path from the user
-filepath = input('Enter your file path: ')
+def convert_pdf_to_excel(source_file):
+    # Get the base name and directory of the source file
+    base_name = os.path.basename(source_file)
+    directory = os.path.dirname(source_file)
 
-# Remove surrounding quotes if present
-if filepath.startswith('"') and filepath.endswith('"'):
-    filepath = filepath[1:-1]
+    # Replace .pdf with .xlsx
+    excel_file = os.path.join(directory, base_name.replace('.pdf', '.xlsx'))
 
-# Replace backslashes with forward slashes
-filepath = filepath.replace('\\', '/')
-print(filepath)
+    # Read PDF file using camelot
+    tables = camelot.read_pdf(source_file, pages='all', flavor='stream')
 
-# Check if the file path is valid
-if not is_valid_pdf(filepath):
-    print("File path is not a valid PDF.")
-else:
-    def convert_pdf_to_excel(source_file):
-        # Get the base name and directory of the source file
-        base_name = os.path.basename(source_file)
-        directory = os.path.dirname(source_file)
+    # Save each table to an Excel file
+    with pd.ExcelWriter(excel_file) as writer:
+        for i, table in enumerate(tables):
+            table.df.to_excel(writer, sheet_name=f"Sheet_{i}", index=False)
 
-        # Replace .pdf with .xlsx
-        excel_file = os.path.join(directory, base_name.replace('.pdf', '.xlsx'))
+    print(f"Converted {source_file} to {excel_file}")
 
-        # Read PDF file using camelot
-        tables = camelot.read_pdf(source_file, pages='all', flavor='stream')
+def filepath_to_excel(iteration):
+    # Get the file path from the user
+    filepath = input(f'Enter your filepath {iteration}: ')
+    po_id = input(f'Enter your Ana PO id {iteration}: ')
+    memo = input(f'Enter your Memo {iteration}: ')
 
-        # Save each table to an Excel file
-        with pd.ExcelWriter(excel_file) as writer:
-            for i, table in enumerate(tables):
-                table.df.to_excel(writer, sheet_name=f"Sheet_{i}", index=False)
+    # Remove surrounding quotes if present
+    if filepath.startswith('"') and filepath.endswith('"'):
+        filepath = filepath[1:-1]
 
-        print(f"Converted {source_file} to {excel_file}")
+    # Replace backslashes with forward slashes
+    filepath = filepath.replace('\\', '/')
+    print(filepath)
 
-    # Example usage
-    convert_pdf_to_excel(filepath)
-    print("Successfully Converted!")
+    # Check if the file path is valid
+    if not is_valid_pdf(filepath):
+        print("File path is not a valid PDF.")
+    else:
+        convert_pdf_to_excel(filepath)
+        print("Successfully Converted!")
+
+    return filepath, po_id, memo
+
+
 
 def check_orderd_string(df):
     for col in df.columns:
@@ -168,14 +175,14 @@ def netsuite_import_sku(filepath):
         final_df['Vendor'] = '4062 Tool Technology Distributors, Inc.'
         final_df['SKU'] = final_df['Item Name']
         final_df = final_df[['Vendor', 'Item Name', 'SKU', 'Price']]
-        return  final_df.to_csv(sku_filename, index=False)
+        return final_df
     else:
         final_df = pd.DataFrame()
         print("No valid items found in any sheets.")
 
     # print(final_df)
 
-def netsuite_import_so(filepath):
+def netsuite_import_so(filepath, po_id, memo):
 
     # Replace the file extension from .pdf to .xlsx
     excel_path = filepath.replace(".pdf", ".xlsx")
@@ -209,11 +216,80 @@ def netsuite_import_so(filepath):
         subtotal = final_df["Total"].sum()
         print(f"Sub-total Amount: {subtotal:.2f}")
 
-        final_df = final_df.drop(columns=['Total'])
+        # Rearrange SKU import csv columns
+        final_df = final_df.rename(columns={'Item ID':'Item Name',
+                                            'Price':'Rate',
+                                            'Total': 'Price',
+                                            'Ordered': 'Quantity'})
+        final_df['SKU'] = final_df['Item Name']
+        final_df['Ana SO'] = po_id
+        final_df['Date'] = formatted_today_date
+        final_df['Vendor'] = '4062 Tool Technology Distributors, Inc.'
+        final_df['Memo'] = memo
+        final_df['Purchaser'] = "Hank Kyaw"
+        final_df = final_df[['Ana SO', 'Date', 'Vendor', 'Purchaser', 'Memo', 'Item Name', 'SKU', 'Rate', 'Quantity', 'Price']]
+        return final_df
     else:
         final_df = pd.DataFrame()
         print("No valid items found in any sheets.")
 
     print(final_df)
 
-netsuite_import_sku(filepath)
+def extract_integer(input_str):
+    # Trim leading and trailing whitespace
+    input_str = input_str.strip()
+
+    # Initialize an empty string to collect numeric characters
+    num_str = ''
+    decimal_found = False
+
+    for char in input_str:
+        # Allow digits and, at most, one decimal point
+        if char.isdigit():
+            num_str += char
+        elif char in (',') and not decimal_found:
+            decimal_found = True
+        elif not char.isdigit():
+            break
+
+    # Convert the extracted numeric string to an integer
+    try:
+        # Convert to float first, then to integer
+        num = int(float(num_str))
+    except ValueError:
+        # If conversion fails, return 0 (or handle it as per your need)
+        num = 0
+
+    return num
+
+def combine_all_sku_and_po():
+    num_of_iteration = input("How many Tool Tech that you need to process? ")
+    num_of_iteration = extract_integer(num_of_iteration)
+
+    # Initialize empty lists to store DataFrames
+    sku_df_list = []
+    po_df_list = []
+
+    # Loop over the number of iterations
+    for i in range(1, num_of_iteration + 1):
+        filepath, po_id, memo = filepath_to_excel(i)
+
+        # Get SKU and PO DataFrames
+        sku_df = netsuite_import_sku(filepath)
+        po_df = netsuite_import_so(filepath, po_id, memo)
+
+        # Append the DataFrames to the respective lists
+        sku_df_list.append(sku_df)
+        po_df_list.append(po_df)
+
+    # Concatenate all SKU and PO DataFrames
+    final_sku_df = pd.concat(sku_df_list, ignore_index=True)
+    final_po_df = pd.concat(po_df_list, ignore_index=True)
+
+    final_sku_df.to_csv(sku_filename, index=False)
+    final_po_df.to_csv(po_filename, index=False)
+
+combine_all_sku_and_po()
+
+# netsuite_import_sku(filepath)
+# netsuite_import_so(filepath, 24080401, "Weekly points and tips for Swiss Dept.")
