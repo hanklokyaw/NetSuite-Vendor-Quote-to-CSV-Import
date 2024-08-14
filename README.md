@@ -1,4 +1,4 @@
-# Tool Tech PDF to CSV Conversion
+# Vendor Quote PDF to Net Suite CSV Upload Format
 
 ## Overview
 This script processes PDF files containing item data and sales orders, converts them to Excel files, and then transforms the data into CSV files suitable for importing into NetSuite.
